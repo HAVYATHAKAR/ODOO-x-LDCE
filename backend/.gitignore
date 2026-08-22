@@ -27,7 +27,7 @@ env/
 .coverage
 htmlcov/
 
-# OS / editor
+# OS/Teditor
 .DS_Store
 .idea/
 .vscode/
