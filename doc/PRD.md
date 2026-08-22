@@ -23,12 +23,12 @@
 The working documents were authored at different times and diverged. This PRD resolves the divergence explicitly:
 
 - **Backend stack — FastAPI/Python is canonical.** `ARCHITECTURE.md`, `DATABASE.md`, and `REST_API_Specification.md` all target **FastAPI + SQLAlchemy + Alembic + PostgreSQL**. This is the design of record. The current `server/` code (Node.js/Express/Prisma) and `SCHEMA.md` describe an **early prototype** and are treated as **superseded**; the production build targets the FastAPI design in this PRD. See §19 (Risks & Open Decisions) for the migration note.
-- **Data model — the Sections model is canonical.** `DATABASE.md` (which self-identifies as "the most important document") defines a **Sections-based** itinerary: `trips → trip_sections → section_activities`, plus a `community` subsystem. This supersedes the older **Stops-based** model (`trip_stops`, `trip_activities`, `expenses`, `shared_trips`) still referenced in `REST_API_Specification.md` and `SCHEMA.md`. All API endpoints in §12 are reconciled to the Sections model.
+- **Data model — the Sections model is canonical.** `DATABASE.md` (which self-identifies as "the most important document") defines a **Sections-based** itinerary: `trips → trip_sections → section_activities`, plus a `community` subsystem. This supersedes the older **Stops-based** model (`trip_stops`, `trip_activities`, `expenses`, `shared_trips`) still referenced in `REST_API_Specification.md` and `SCHEMA.md`. All API endpoints in §11 are reconciled to the Sections model.
 - **UX — the workspace model is canonical.** `UI_UX.md` §1–§53 (the product body) is authoritative for experience and design; its §54–§59 appendix is an illustrative implementation reference only and does not override the data model in §10.
 
 ### 0.2 How to use this document
 
-Product/design readers: §1–§9, §13–§14, §17. Backend readers: §10–§12, §15. Frontend readers: §8–§9, §11 (frontend), §12–§14. Delivery/judging: §16–§18. Everyone: §0.1 and §19.
+Product/design readers: §1–§9, §12–§13, §16–§17. Backend readers: §9–§11, §14–§15. Frontend readers: §7–§9, §10.2 (frontend), §11–§13. Delivery/judging: §15–§18. Everyone: §0.1 and §19.
 
 ### 0.3 Requirement labels & priorities
 
@@ -439,4 +439,441 @@ Avg / day      = Actual total / (end_date − start_date + 1)
 
 `cities` and `activities` are seeded once from `backend/app/seeds/` into PostgreSQL (~40–60 real cities across regions, each with 4–8 activities across categories, with real `cost_index`/`popularity_score`). Plus **one fully-built demo trip** (multi-city, multiple days, a deliberately overloaded day, a deliberately over-budget category) under a pre-built demo account, and at least one public trip so Community renders immediately. At runtime the app reads all of this **from the DB via the API** — the front end never bundles static JSON. This satisfies the "dynamic data, not static JSON" constraint while avoiding external APIs.
 
-<!-- BUILD-CURSOR -->
+## 10. System Architecture
+
+**Three tiers, one direction of dependency:** React → FastAPI → PostgreSQL. The front end never talks to the DB directly; the DB is reached only through the service/CRUD layers. Everything is our own code — no BaaS, no external data APIs.
+
+```mermaid
+flowchart LR
+    subgraph Client["React SPA (Vite + TS)"]
+        UI[Pages & Components] --> RQ[TanStack Query cache] --> AX[Typed API client]
+    end
+    subgraph Server["FastAPI (Python)"]
+        R[Routers / API layer] --> S[Services / business logic] --> C[CRUD / data access] --> M[SQLAlchemy models]
+    end
+    DB[(PostgreSQL 16)]
+    AX -- "HTTPS / JSON + JWT" --> R
+    M -- SQL --> DB
+```
+
+### 10.1 Backend (FastAPI) — layered
+
+A layered design keeps HTTP, business rules, and persistence separate — each testable in isolation.
+
+```
+backend/app/
+├── main.py                 # app factory, router registration, middleware, CORS
+├── core/                   # config (pydantic-settings), database (engine/SessionLocal/get_db), security (hashing, JWT, get_current_user)
+├── models/                 # SQLAlchemy ORM — one file per aggregate (user, trip, section, section_activity, activity, city, community…)
+├── schemas/                # Pydantic v2 request/response DTOs (validation lives here)
+├── crud/                   # thin data-access functions (no HTTP, no business rules)
+├── services/               # business logic (budget calc, trip copy/share slug, section reorder, community, trip health)
+├── api/
+│   ├── deps.py             # shared deps (current user, ownership, list-query parser: search/filter/sort/group_by)
+│   └── routers/            # auth, trips, sections, activities, cities, budget, users, community, calendar, public, admin
+├── seeds/                  # city & activity seed loaders (run once)
+└── tests/
+```
+
+**Request lifecycle:** `Router` (parse + validate via Pydantic, resolve `current_user`) → `Service` (enforce rules: ownership, budget math) → `CRUD` (query/commit via ORM) → response serialized by a Pydantic schema. Errors bubble up as typed HTTP exceptions with a consistent JSON body.
+
+**Why FastAPI:** Pydantic validation is free and typed (structured `422` field errors), auto OpenAPI docs at `/docs`, async-capable and fast.
+
+### 10.2 Frontend (React + Vite + TS) — feature-sliced
+
+Code grouped by domain feature so each teammate can own a feature end-to-end.
+
+```
+frontend/src/
+├── main.tsx / App.tsx / router.tsx
+├── api/           # client.ts (fetch wrapper: base URL, JWT header, error normalization) + typed endpoints/ per resource
+├── context/AuthContext.tsx      # holds session, guards routes
+├── components/    # design-system primitives + shared ListToolbar (Search + Group by + Filter + Sort)
+├── features/      # auth, trips, itinerary, search(discover), budget, community, calendar, health, admin
+├── pages/         # route-level screens
+├── hooks/         # useAuth, useTrips, useDebounce…
+└── styles/tokens.css            # design tokens — single source of truth
+```
+
+- **Server state** via TanStack Query (caching, refetch, optimistic updates for drag-reorder).
+- **Forms** via React Hook Form + Zod; the Zod schema mirrors the backend Pydantic rules so validation messages match on both sides.
+- **Routing** via React Router with a `<ProtectedRoute>` wrapper reading `AuthContext`.
+
+### 10.3 Authentication & authorization flow
+
+```mermaid
+sequenceDiagram
+    participant U as React
+    participant A as FastAPI /auth
+    participant DB as PostgreSQL
+    U->>A: POST /auth/login {username, password}
+    A->>DB: fetch user by username
+    A->>A: bcrypt.verify(password, hash)
+    A-->>U: { access_token (15m), refresh_token (7d) }
+    U->>A: GET /trips (Authorization: Bearer access)
+    A->>A: decode JWT → user_id; load current_user
+    A->>DB: SELECT trips WHERE user_id = current_user
+    A-->>U: only the user's trips
+```
+
+- **Passwords:** bcrypt (passlib); never stored/logged in plaintext.
+- **Tokens:** short-lived access JWT + longer refresh JWT; `get_current_user` decodes and loads the user on every protected route.
+- **Ownership checks:** services assert `trip.user_id == current_user.id` before any read/write; `user_id` is taken from the JWT, **never** from the request body.
+- **Public sharing:** the only unauthenticated data route is `GET /public/{slug}`, returning a trip only if `is_public = true`.
+- **Admin:** `is_admin` gate on `/admin/*`.
+
+### 10.4 Validation strategy — two layers, one contract
+
+| Layer | Tool | Responsibility |
+|---|---|---|
+| Client | Zod + React Hook Form | Instant feedback; prevent obviously-bad submits |
+| Server | Pydantic v2 schemas | **Authoritative** validation; never trusts the client |
+| DB | CHECK / UNIQUE / FK constraints | Last line of defense; integrity even against bugs |
+
+The same rule set (email format, password length, `end_date ≥ start_date`, non-negative costs) is expressed in all three layers. Example invalid-email response: `{ "detail": [ { "field": "email", "message": "value is not a valid email address" } ] }`.
+
+### 10.5 Security checklist
+
+bcrypt hashing (configurable cost) · JWT with expiry + refresh rotation · per-resource ownership enforcement · password reset via hashed, single-use, expiring tokens · Pydantic input validation on every endpoint (rejects extra/typed-wrong fields) · SQL-injection safe (ORM parameterization, no string-built SQL) · CORS locked to the frontend origin · secrets via env vars (`.env`, never committed) · soft-delete for accounts · ⭘ (stretch) rate limiting on `/auth/*`.
+
+### 10.6 Scalability & performance
+
+Stateless API (JWT, no server sessions) → horizontally scalable behind a load balancer · indexed queries for every list/search path (§9.5) · pagination on list endpoints · N+1 avoided via SQLAlchemy eager loading (`selectinload`) when fetching a trip with its sections & activities · cacheable reference data (cities/activities) via TanStack Query.
+
+### 10.7 Dependency philosophy
+
+**No external data services or APIs** — no Firebase/Supabase/Mongo Atlas, no Google Maps/Places, no third-party auth. All cities, activities, costs, and coordinates live in our PostgreSQL and are served by our API. **Libraries ≠ external services**: well-understood open-source libraries (FastAPI, SQLAlchemy, React, TanStack Query, Recharts, dnd-kit) are engineering tooling, each explainable by the team. Real, dynamic data everywhere at runtime; static JSON only ever transiently during early prototyping, never in the shipped build.
+
+### 10.8 Testing approach
+
+| Level | What | Tool |
+|---|---|---|
+| Unit | Budget aggregation, trip-copy, slug generation, health scoring | pytest |
+| API | Auth flow, ownership rejection, validation errors, CRUD happy paths | pytest + httpx TestClient |
+| DB | Constraint enforcement (e.g. `end_date ≥ start_date`) | pytest against a test DB |
+| Frontend | Critical components & form validation | Vitest + React Testing Library |
+
+Target: a minimal but meaningful suite (auth, ownership, budget math, one full itinerary flow).
+
+### 10.9 Environment & configuration
+
+Backend `.env`: `DATABASE_URL`, `JWT_SECRET`, `JWT_ACCESS_MINUTES`, `JWT_REFRESH_DAYS`, `CORS_ORIGINS`. Frontend `.env`: `VITE_API_URL`. Both ship a committed `.env.example`; real secrets never enter Git. `docker-compose.yml` provisions PostgreSQL + both services for local dev.
+
+## 11. API Specification
+
+> Endpoints are **reconciled to the canonical Sections model** (§9). Where `REST_API_Specification.md` used `stops`/`trip_activities`/`expenses`/`shared_trips`, this PRD uses `sections`/`section_activities` and folds expenses into `section.budget` (planned) + `section_activity.expense` (actual). Legacy names are noted where migration matters.
+
+### 11.1 Conventions
+
+- **Base path:** `/api/v1`. **Format:** `application/json`. **Auth:** `Authorization: Bearer <JWT>`.
+- **Dates:** ISO-8601 (`YYYY-MM-DD`; datetimes `YYYY-MM-DDTHH:MM:SSZ`).
+- **Pagination:** `?page=1&size=20` → `{ "items": [...], "total", "page", "size", "pages" }`.
+- **Search/filter/sort:** `?q=`, `?country=`, `?category=`, `?sort_by=&sort_order=`, optional `?group_by=`.
+- **Errors:** `{ "error": { "code", "message", "details": [...] } }` (Pydantic 422 uses FastAPI's `{ "detail": [...] }` field-error shape).
+- **Mutating endpoints** return enough of the updated trip/section/budget/health payload for the client to reconcile its optimistic update without a second round-trip. Budget responses always return `planned` and `actual` as **distinct** fields (never a merged `spent`).
+
+**HTTP status codes:** `200` read/update · `201` created · `204` deleted · `400` invalid input · `401` missing/invalid JWT · `403` authenticated but not permitted · `404` not found · `409` business conflict (e.g. username/email exists) · `422` validation · `500` unhandled.
+
+### 11.2 Endpoint contract (canonical)
+
+| Domain | Method | Endpoint | Auth | Purpose / notes |
+|---|---|---|---|---|
+| Auth | POST | `/auth/register` | No | Create account (full profile); `201` + tokens; `409` if username/email exists |
+| Auth | POST | `/auth/login` | No | Username+password → access+refresh JWT; `401` on bad creds |
+| Auth | POST | `/auth/refresh` | No (refresh token) | Rotate access token |
+| Auth | POST | `/auth/forgot-password` | No | Send reset (never reveals if email exists) |
+| Auth | POST | `/auth/reset-password` | No | Consume single-use hashed token |
+| Dashboard | GET | `/dashboard` | Yes | Aggregate: next trip, attention items, recommendations |
+| Trips | POST | `/trips` | Yes | Create trip; `400` if `end_date < start_date`; returns workspace payload |
+| Trips | GET | `/trips` | Yes | List own trips (paginated); status derived from dates |
+| Trips | GET | `/trips/{trip_id}` | Yes (owner) | Full trip incl. sections + section_activities (eager-loaded) |
+| Trips | PATCH | `/trips/{trip_id}` | Yes (owner) | Update trip fields |
+| Trips | DELETE | `/trips/{trip_id}` | Yes (owner) | Delete trip (cascade to sections/section_activities) |
+| Trips | POST | `/trips/{trip_id}/copy` | Yes | Deep-clone into caller's account; sets `copied_from_trip_id` |
+| Sections | POST | `/trips/{trip_id}/sections` | Yes (owner) | Add a section *(was `/stops`)*; dates within trip range |
+| Sections | PATCH | `/sections/{section_id}` | Yes (owner) | Edit section |
+| Sections | DELETE | `/sections/{section_id}` | Yes (owner) | Remove section (cascade) |
+| Sections | PUT | `/trips/{trip_id}/sections/reorder` | Yes (owner) | Transactional reorder by `sequence_order` array |
+| Section acts | POST | `/sections/{section_id}/activities` | Yes (owner) | Schedule an item *(was `/stops/{id}/activities`)* |
+| Section acts | PATCH | `/section-activities/{id}` | Yes (owner) | Edit / reschedule (day, time, order, expense) |
+| Section acts | DELETE | `/section-activities/{id}` | Yes (owner) | Remove item (Undo window is client-side) |
+| Cities | GET | `/cities` | Yes | Search/filter catalog (`?q`, `?region`, `?country`, sort) |
+| Cities | GET | `/cities/{id}` | Yes | City detail |
+| Activities | GET | `/activities` | Yes | Search (`?city_id` required, `?category`, `?max_cost`, `?duration`) |
+| Calendar | GET | `/trips/{trip_id}/timeline` | Owner or public | Day-grouped structured plan |
+| Calendar | GET | `/calendar?month=YYYY-MM` | Yes | All own trips overlapping the month |
+| Budget | GET | `/trips/{trip_id}/budget` | Yes (owner) | `planned`, `actual`, `variance`, by-category, per-day, alerts |
+| Health | GET | `/trips/{trip_id}/health` | Yes (owner) | Overall + 5 sub-scores + explanations + suggested fix |
+| Sharing | POST | `/trips/{trip_id}/share` | Yes (owner) | Set `is_public`, generate `public_slug`; opt-in show-cost flag |
+| Sharing | GET | `/public/{slug}` | No | Read-only public trip story (planned totals only; never actuals) |
+| Community | GET | `/community/posts` | Yes | Feed (`?sort=recent|popular`, paginated) |
+| Community | POST | `/community/posts` | Yes | Create post (optional linked trip) |
+| Community | POST | `/community/posts/{id}/like` | Yes | Like/unlike (unique per user) |
+| Community | POST | `/community/posts/{id}/comments` | Yes | Add comment |
+| Profile | GET | `/profile` | Yes | Current user profile |
+| Profile | PUT | `/profile` | Yes | Update name/photo/language/currency/prefs |
+| Profile | DELETE | `/profile` | Yes | Soft-delete account |
+| Saved | GET/POST/DELETE | `/saved-destinations` | Yes | List/add/remove bookmarked cities |
+| Admin | GET | `/admin/analytics` | Yes (admin) | Real aggregates: top cities/activities, trips over time |
+| Admin | GET | `/admin/users` | Yes (admin) | User management |
+
+### 11.3 Representative response schemas
+
+```jsonc
+// GET /trips/{id}/budget  (planned and actual always distinct)
+{
+  "currency": "INR",
+  "planned_total": 42600, "target": 50000,
+  "actual_total": 18300, "variance": 2300,          // actual/variance omitted if no expenses logged
+  "by_category_planned": { "transport": 9200, "accommodation": 18000, "activity": 7400, "food": 6000, "other": 2000 },
+  "per_day": [ { "date": "2026-11-15", "amount": 6200, "over_budget": true } ],
+  "insight": "Day 4 is your most expensive day at ₹6,200"
+}
+
+// GET /trips/{id}/health
+{
+  "overall": 92,
+  "sub_scores": { "budget": 94, "schedule_balance": 82, "destination_flow": 96, "activity_density": 87, "completeness": 91 },
+  "issues": [ { "sub": "schedule_balance", "message": "Day 4 contains 10.5 hours of scheduled activities.",
+                "fix": { "action": "move_activity", "section_activity_id": 123, "suggested_date": "2026-11-16" } } ]
+}
+```
+
+### 11.4 Transactions & error mappings
+
+**Must be transactional (rollback on any failure):**
+1. **Copy Trip** — insert new trip + all sections + all section_activities atomically; abort to prevent orphans.
+2. **Account deletion** — soft-delete user; cascade handled per §9.4.
+3. **Section reorder** — batch-update `sequence_order` atomically (unique constraint deferred) to avoid corrupted/duplicate orders.
+
+**Standard mappings:** `400` missing fields / `end < start` · `401` expired/tampered JWT · `403` editing another user's trip · `404` unknown `trip_id`/`city_id` · `409` username/email already in use · `422` Pydantic type errors.
+
+## 12. Design System & UX Standards
+
+### 12.1 Tokens
+
+```
+Radius   sm 6px (inputs/buttons) · md 10px (cards/panels) · lg 16px (modals/sheets) · pill 999px (chips only)
+Space    4 · 8 · 12 · 16 · 24 · 32 · 48 · 64 px
+Shadow   sm 0 1px 2px rgba(15,23,42,.06) · md 0 4px 12px rgba(15,23,42,.08) · lg 0 12px 32px rgba(15,23,42,.12)
+Controls heights 32 / 40 / 48 · icons 16 / 20 / 24
+```
+One radius scale, used consistently — no arbitrary radii anywhere.
+
+### 12.2 Typography
+
+- **Display/headings:** a high-contrast serif/slab (e.g. Fraunces / Newsreader) — H1/H2 only.
+- **UI/body:** a clean grotesk (e.g. Inter / Public Sans) for everything else.
+- **Numeric data:** tabular-nums variant so budget columns align.
+
+Scale (rem @16px): display-xl 3.0 (landing hero) · display-lg 2.25 (page H1) · heading-md 1.5 (H2) · heading-sm 1.125 (card titles) · body-lg 1.0 · body-sm 0.875 · caption 0.75. Narrative text capped at ~72ch.
+
+### 12.3 Color (semantic tokens only — never a raw hex in component code)
+
+```
+--background #FFFFFF / #12151A      --surface #F7F5F2 / #1B1F27      --surface-elevated #FFFFFF / #232833
+--foreground #1A1D23 / #F3F4F6      --foreground-muted #5B6472 / #A2AAB8      --border #E4E1DB / #2D323C
+--brand #B5502E (terracotta)        --brand-strong #8F3E22 (hover/active, link text)
+--success #1E7A4C   --warning #B7791F   --danger #C13333   --info #2A6FB0
+```
+
+**Verified contrast (WCAG 2.2, light theme):** foreground on background ~16.5:1 (AAA) · foreground-muted on background ~5.1:1 (AA body) · white on `--brand` fill ~5.0:1 (AA) · `--brand` as text ~4.6:1 (AA, borderline — use `--brand-strong` ~6.1:1 for small link text) · status colors all ≥4.5:1 by design. **Rule:** any new color must pass a contrast check against both `--background` and `--surface-elevated` before use as text; otherwise it is decorative-only. Category colors are chip fills with dark-on-light text, always paired with an icon + label (never color-only meaning). Dark-theme hexes are defaults and must be independently contrast-checked before ship.
+
+### 12.4 Component system
+
+**Navigation:** Navbar, SideRail, TripSubNav, MobileTabBar, Breadcrumbs (Admin).
+**Forms:** Input, DatePicker (range-aware, blocks end<start), Select, SearchField (debounced), Textarea, Slider, Toggle, ImageUpload.
+**Travel:** DestinationCard, ActivityCard, TripCard, DaySection, ItineraryItem, JourneyNode, TripHealthGauge, BudgetBar.
+**Data:** BudgetChart (bar + category donut), ProgressBar, Stat, Timeline, VarianceRow.
+**Feedback:** Toast, InlineAlert, EmptyState, ErrorState, Skeleton, Modal, Sheet, SaveIndicator, UndoToast, CommandPalette.
+
+Every component must ship its full state set (§12.5) before it is "done" — partial state coverage is a QA-blocking defect.
+
+### 12.5 Interaction states & the standard mutation contract
+
+Every interactive component defines **default, hover, focus (visible 2px `--brand` ring), active, selected, disabled, loading, error, success** (disabled/loading may be N/A for static components like Stat).
+
+Standard contract for all mutating actions:
+```
+Before   control idle, prior data visible
+During   optimistic UI update fires immediately; SaveIndicator → "Saving…"
+After    SaveIndicator → "✓ Saved just now" (auto-dismiss 3s); dependent panels (Budget, Health) recompute same tick
+Failure  optimistic change reverts; InlineAlert/Toast states the cause in plain language + Retry
+Recovery Retry re-attempts; persistent failure shows "still trying," never silently gives up
+```
+
+### 12.6 Motion
+
+Micro 100–180ms (hover/focus, toggles) · Standard 180–300ms (panel/tab switches, card entrance, drawer) · Emphasis 300–500ms (Health count-up, budget-bar fill, modal open). Motion is only ever attached to a user-caused state change or a changed value — no ambient/looping decoration. `prefers-reduced-motion: reduce` disables count-up/fill/cross-fades; drag-reorder still works (position updates without FLIP animation).
+
+### 12.7 Autosave, Undo & Confirmation
+
+- **Autosave:** all Itinerary/Budget/Trip edits autosave per §12.5 — no explicit Save button on those surfaces.
+- **Undo:** reversible actions (remove activity/destination, unschedule) show an UndoToast for 6s ("Activity removed. [ Undo ]") — no confirmation dialog.
+- **Confirmation (destructive, non-undoable):** delete trip, delete account — both require **typing the trip/account name**; a checkbox or single click is insufficient.
+
+### 12.8 Accessibility — target WCAG 2.2 AA (an acceptance criterion per screen)
+
+Keyboard reachable/activatable for every action, including a full itinerary-reorder keyboard path (§8.6) · visible 2px `--brand` focus ring (never bare `outline:none`) · icon-only buttons have `aria-label`; cards expose name/cost/duration/category as text, not color · semantic HTML, ordered headings, labeled forms · inline form errors via `aria-describedby` + `aria-live="polite"` · 44×44px min touch targets · reduced motion honored · **accessible drag alternative** (visible "Move to…" dialog performing the identical mutation) · **accessible charts** (adjacent data table / "View as table" toggle; SVG `role="img"` + full `aria-label`) · **accessible dialogs** (focus trap, `Esc` to close, focus returns to trigger, `aria-modal`).
+
+### 12.9 Responsive strategy
+
+| Aspect | Mobile <640 | Tablet 640–1024 | Desktop >1024 |
+|---|---|---|---|
+| Itinerary | Single column + horizontal day switcher | Two columns (days + itinerary), insights drawer | Three columns (days / itinerary / insights) |
+| Dialogs | Full-height bottom sheets | Centered modals 560px | Centered modals 480–640px |
+| Discover | 1-col cards, filters in a sheet | 2-col grid, sidebar chips | 3-col grid, sidebar filters |
+| Budget chart | Stacked bar + collapsible list | Bar + donut side by side | Bar + donut side by side |
+
+Trip Workspace desktop: fixed 240px rail · fluid center (min 480px) · fixed 320px right insights pane (collapses <1280px). Content max-width 1280px, 12-col grid, 24px gutters.
+
+### 12.10 Empty / Loading / Error states (product-voiced, always with recovery)
+
+- **Empty:** never "No data found." No trips → "Your next adventure starts here." → Plan your first trip; empty day → "This day still has room for something memorable." → Explore activities; no results → "Nothing matches yet — try a different city or filter." → Clear filters; no expenses → omit the row (don't show ₹0).
+- **Loading:** skeletons matching final layout shape (not spinners/blank), appearing only after ~150ms to avoid flashing.
+- **Error:** plain-language explanation + recovery, never a raw code. Network → "You're offline — changes are saved locally." (auto-retry on reconnect); 5xx → "Something went wrong on our end." [Try again]; failed save → "Couldn't save that change." [Retry]; stale/conflict → "This day changed elsewhere — reload."
+- **Writing tone:** confident + warm + concise. "Your trip is saved," not "Trip data successfully persisted." Numbers always carry unit and kind (₹, planned vs actual, days vs hours) — never bare.
+
+### 12.11 Image & performance strategy
+
+Local/bundled optimized images + SVG illustration fallbacks keyed by region/category (no live external image API); native `loading="lazy"` with explicit width/height (no layout shift); debounce search 300ms; paginate/virtualize long lists; cache trip/discover queries (TanStack Query) with background revalidation.
+
+## 13. Key User Flows
+
+Each flow follows: entry → actions → feedback → success → failure → recovery.
+
+1. **Signup → Dashboard.** Landing → Signup form → submit (validating→submitting) → success toast → Dashboard (empty state if no trips). *Failure:* inline field errors / server InlineAlert; *recovery:* correct and resubmit.
+2. **Dashboard → Create Trip → Trip Workspace.** [Plan New Trip] → Create Trip form → Save (button loading) → lands directly in the new trip's **Overview**. *Failure:* inline validation; *recovery:* fix and resubmit.
+3. **Discover → Destination → Add to Trip.** Search/filter → open DestinationCard detail → [Add to Trip] (trip picker if none active) → optimistic add, SaveIndicator, Itinerary/Overview update. *Failure:* revert + retry toast.
+4. **Trip → Add Activity → Schedule.** Trip-scoped Discover → activity detail → Add → item appears in the trip's first open day → drag/keyboard-move to the desired day/time. *Failure:* invalid drop (outside trip dates) springs back with an inline reason.
+5. **Reorder activity → Trip Health updates.** Drag or keyboard move → position/day updates optimistically → Health sub-scores recalc with count-up → autosave confirms.
+6. **Budget changes → visualization updates.** Add/edit/remove an item's estimated cost, or log an actual expense → Budget bar, category breakdown, and Health "Budget" sub-score recompute in the same render cycle.
+7. **Share → Public itinerary → Copy Trip.** Trip Workspace → Share → toggle "show budget totals" (optional) → [Copy public link] → visit `/t/{slug}` → viewer clicks [Copy Trip] → if unauthenticated, prompted to sign up/login → trip deep-clones into their account → lands in their own new Trip Workspace.
+8. **Mobile planning.** Bottom tab bar → Itinerary → day switcher (horizontal scroll) → long-press to drag *or* kebab → "Move to…" sheet → confirm → SaveIndicator confirms.
+9. **Offline / degraded network.** Offline banner appears (non-blocking) → user edits itinerary → affected rows marked "Pending sync" → reconnect → auto-sync via the same conflict-detection path as §8.6 → conflict surfaced for resolution, else silent success. Queued edits are never silently dropped or overwritten.
+
+## 14. Non-Functional Requirements
+
+| Area | Requirement |
+|---|---|
+| Performance | List/search endpoints indexed and paginated; trip fetch avoids N+1 via eager loading; search debounced 300ms; skeletons after ~150ms; images lazy-loaded with fixed dimensions. |
+| Security | bcrypt hashing; JWT expiry + refresh rotation; ownership enforced server-side from JWT (never request body); Pydantic validation on every endpoint; ORM-parameterized queries; CORS locked to frontend origin; secrets in env only; hashed single-use reset tokens. |
+| Privacy | Trips private by default; public pages never expose actual-expense data; owner-only data verified server-side. |
+| Reliability | Transactional Copy Trip / account deletion / section reorder; optimistic updates with revert-on-failure; conflict detection instead of last-write-wins for itinerary data. |
+| Accessibility | WCAG 2.2 AA per screen (§12.8); Lighthouse/axe pass in QA. |
+| Portability | `docker-compose` for Postgres + services; `.env.example` committed; one-command setup + seed. |
+| Maintainability | Layered backend + feature-sliced frontend; single design-token source; schema documented alongside `schema`/migrations. |
+| Observability (stretch) | Structured error bodies; optional `audit_events` for admin. |
+
+## 15. Build Plan, Priorities & Deliverables
+
+### 15.1 Build-order priorities
+
+- **P0 (must work for the demo):** Auth (§8.1), Dashboard (§8.2), Create Trip → Trip Workspace (§8.3), Discover (§8.5), Itinerary Builder (§8.6), Budget with planned/actual split (§8.8), Calendar (§8.7), Public Share + Copy Trip (§8.11), responsive layouts (§12.9).
+- **P1:** Drag-and-drop polish + keyboard/accessible alternative (§8.6/§12.8), Trip Health (§8.9), autosave/undo (§12.7), Community feed (§8.12), micro-motion (§12.6).
+- **P2 (time-permitting):** Admin analytics (§8.14), Quick Add / Command Palette, Trip Templates, deeper Discover personalization (§8.10).
+
+### 15.2 Deliverables & handoff
+
+Git repo with `/frontend` (Vite+React+TS) and `/backend` (FastAPI+SQLAlchemy+Alembic); `docker-compose.yml` for Postgres + both services; a README covering env setup and seeding; FastAPI auto-generated OpenAPI docs at `/docs`; migration + seed scripts (§9.8); this PRD as the master spec; and **one pre-built demo account** so judges log in to populated data rather than building a trip from zero.
+
+### 15.3 Definition of done (per screen)
+
+A screen is done only when: all applicable states (§12.5) exist; the keyboard path exists (§12.8); empty/loading/error/success states exist (§12.10); every data-changing action follows the autosave/undo/confirm contract (§12.7); the mobile layout is intentionally designed (not just reflowed); and contrast is checked (§12.3), not assumed.
+
+## 16. Demo Narrative & WOW Moments
+
+**3–5 minute demo flow:**
+```
+Landing → Dashboard → Create trip → Add 3 cities (Discover)
+→ Drag/reorder in Itinerary → Add activities → Calendar view
+→ Trip Health flags an overloaded day → [ Move it for me ] fixes it live
+→ Budget updates automatically → Discover shows a "Fits your budget" pick
+→ Add it → Share tab → open Public Trip Story in a new tab → Copy Trip
+```
+This single continuous narrative demonstrates design + interaction + deterministic intelligence + real database-backed state, matching the DISCOVER→PLAN→VALIDATE→OPTIMIZE→SHARE loop rather than jumping between disconnected screens.
+
+**WOW moments:** (1) Creating a trip drops the user straight into a live workspace, not a confirmation screen. (2) Dragging an activity visibly moves the Trip Health score (count-up) in the same view. (3) Adding an activity updates the Budget bar before leaving the Itinerary tab. (4) Every recommendation states its reason in one line. (5) The Public Trip Story looks like a finished feature, and Copy Trip clones working data into a new account live on stage.
+
+**Why GlobeTrotter wins:** not "more features" — it connects discovery, planning, validation, budget intelligence, and sharing into one continuous workflow around a single persistent Trip Workspace, where every edit visibly changes Budget and Trip Health in the same interaction, and every number and recommendation explains where it came from.
+
+## 17. Evaluation-Criteria Alignment (Odoo)
+
+| Criterion | How GlobeTrotter satisfies it |
+|---|---|
+| **Database design** (highest weight) | Fully normalized 3NF schema (§9), real FK/CHECK/UNIQUE constraints, deliberate documented denormalizations, indexes tuned to actual queries, Alembic migrations. |
+| **Relational-DB usage** | Sections/activities modeled relationally; catalog vs. user-data separation; derived status (no stored redundancy); transactional multi-table operations. |
+| **Input validation / graceful errors** | Three-layer validation (Zod → Pydantic → DB constraints, §10.4); structured 422s; product-voiced error states (§12.10). |
+| **Modularity / coding patterns** | Layered backend (router/service/CRUD/model) + feature-sliced frontend (§10.1–10.2); each layer unit-testable. |
+| **Scalability / performance** | Stateless JWT API, pagination, eager loading, indexed search, client caching (§10.6). |
+| **Security** | §10.5 checklist — hashing, JWT, ownership, CORS, secrets hygiene. |
+| **Build from scratch / minimal 3rd-party APIs** | No external data/maps/auth services; all data in our Postgres, served by our API (§10.7). |
+| **Debugging / quality** | Meaningful test suite across unit/API/DB/frontend (§10.8); QA checklist (§19.2). |
+| **UX / design polish** | Editorial design system, full state coverage, accessibility, responsive (§12). |
+
+## 18. Risks & Open Decisions
+
+| # | Item | Status / decision | Action needed |
+|---|---|---|---|
+| R1 | **Stack divergence** — design docs target FastAPI/Python; current `server/` is Node/Express/Prisma. | **Decided:** FastAPI is canonical; the Node code is a superseded prototype. | Scaffold `/backend` (FastAPI + SQLAlchemy + Alembic) per §10.1; migrate/rewrite routes; retire the Node prototype or keep only as reference. |
+| R2 | **API vs data model** — `REST_API_Specification.md`/`SCHEMA.md` use stops/`trip_activities`/`expenses`/`shared_trips`; canonical model is Sections. | **Decided:** Sections model (§9); endpoints reconciled in §11. | Implement endpoints with the §11 names; treat old stop endpoints as deprecated. |
+| R3 | **Product naming** — "GlobeTrotter" (brief) vs "GlobalTrotter" (in-app logo). | Accepted as intentional. | Confirm the header wordmark once; keep repo/docs on "GlobeTrotter." |
+| R4 | **Primary-key strategy** — `DATABASE.md` uses `bigint`; prototype used cuid/uuid; REST examples show uuid. | Canonical: `bigint` PKs. Public URLs use `public_slug`, not raw IDs, so counts aren't leaked. | Keep `bigint` in models; never expose sequential IDs on public routes. |
+| R5 | **Community scope** — present in schema/API but ranked P1. | In scope as P1. | Ensure feed/like/comment endpoints + UI land after P0 core loop. |
+| R6 | **Multi-currency** — trips carry a `currency`, but no FX conversion (no external API). | Out of scope: amounts shown in the trip's own currency; no cross-currency math. | State this limitation in UI copy where relevant. |
+| R7 | **Trip Health thresholds** — rule bands (hours/day, density) need tuning to demo well. | Open. | Calibrate against the seeded demo trip so an overloaded day and over-budget category both trigger. |
+| R8 | **Hackathon timeline** — full P0 scope is ambitious. | Managed via §15.1 priorities. | Protect the demo loop; defer P2 aggressively. |
+
+## 19. Appendices
+
+### 19.1 Glossary
+
+- **Trip Workspace** — the single persistent trip context (id, name, dates, currency, budget target) shared across all trip tabs.
+- **Section** (`trip_sections`) — the core itinerary building block: "anything — a travel leg, hotel, or activity," with its own date range and budget, optionally tied to a city. Replaces the older "Stop."
+- **Section Activity** (`section_activities`) — a day-scheduled item within a section (catalog activity or custom), carrying a snapshotted `expense`.
+- **Planned vs Actual** — *Planned* = section budgets / estimated costs; *Actual* = logged expenses. Never merged.
+- **Trip Health** — deterministic 0–100 score with 5 explainable sub-scores.
+- **public_slug** — human-readable slug powering the read-only `/t/{slug}` public trip story.
+- **Copy Trip** — deep-clone of a public trip into the viewer's account (records `copied_from_trip_id`).
+- **Derived status** — Upcoming/Ongoing/Completed computed from dates, never stored.
+
+### 19.2 Consolidated QA checklist
+
+**Product/design:** no generic dashboard look · every color traced to §12.3 · no contrast failures (checked) · no dead buttons · no fake statistics anywhere (incl. Admin) · no fake AI (Health/recommendations rule-based + explained) · one style per component · one radius scale · layouts vary (not all cards) · motion tied to state changes only · mobile intentionally designed · keyboard nav incl. itinerary reorder · visible focus states · reduced motion · loading/empty/error/success states everywhere · autosave + undo · destructive actions require typed confirmation · trip context persists across tabs · Budget & Health update live from real data · public sharing hides private data server-side · Copy Trip works end-to-end · estimated vs actual visually + semantically distinct.
+
+**Build/test:** auth flows + error states · trip CRUD + duplicate · search/filters · itinerary add/remove/reorder with no data loss across list & calendar · budget totals reconcile from real rows incl. planned/actual split · public share renders logged-out and Copy Trip clones all data · profile persists · authorization (no cross-user read/write; admin gated) · friendly validation errors · responsive at real breakpoints · Lighthouse/axe pass · simulated network failure shows offline/error states, not a blank screen · passwords hashed, sessions expire.
+
+### 19.3 Screen → primary tables traceability
+
+| # | Screen | Primary tables |
+|---|---|---|
+| 1–2 | Login / Registration | `users` |
+| 3 | Dashboard | `trips`, `cities`, aggregate counts |
+| 4 | Create Trip | `trips` |
+| 5 | Itinerary Builder | `trip_sections`, `section_activities`, `cities`, `activities` |
+| 6 | Itinerary View | `trips → trip_sections → section_activities` |
+| 7 | City Search | `cities` |
+| 8 | Activity Search | `activities` (filtered by city/category/cost) |
+| 9 | Budget & Cost Breakdown | `trip_sections`, `section_activities` (via budget engine §9.6) |
+| 10 | Calendar / Timeline | `trip_sections`, `section_activities.scheduled_date`/`scheduled_time` |
+| 11 | Shared / Public Itinerary | `trips.is_public`, `trips.public_slug` |
+| 12 | Profile / Settings | `users`, `saved_destinations` |
+| 13 | Admin / Analytics | aggregates over `users`, `trips`, `cities`, `activities` |
+| — | Community | `community_posts`, `community_comments`, `community_likes` |
+| — | My Trips (status groups) | `trips` (status derived from dates) |
+
+### 19.4 Source documents & status
+
+| Document | Role | Status |
+|---|---|---|
+| **PRD.md** (this file) | Master source of truth | Authoritative |
+| `DATABASE.md` | Canonical data model detail | Authoritative for schema (§9 derived from it) |
+| `ARCHITECTURE.md` | Backend/frontend architecture detail | Authoritative for architecture (§10 derived from it) |
+| `UI_UX.md` | Experience & design system (§1–§53) | Authoritative for UX; its §54–§59 appendix is illustrative only |
+| `REST_API_Specification.md` | Endpoint reference | Superseded on naming (stops→sections); use §11 |
+| `SCHEMA.md` | Node/Prisma prototype schema | Superseded (prototype record only) |
+| `server/` (Node/Express/Prisma) | Early prototype code | Superseded; rebuild on FastAPI per §10 |
+
+---
+
+*End of PRD v1.0 — 2026-08-22. This document is the master reference; keep it updated as decisions in §18 are resolved.*
