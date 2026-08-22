@@ -1,0 +1,138 @@
+{
+  "cities": [
+    {
+      "name": "Jaipur",
+      "country": "India",
+      "region": "Asia",
+      "latitude": 26.9124,
+      "longitude": 75.7873,
+      "cost_index": 60,
+      "popularity_score": 90,
+      "image_url": "https://images.unsplash.com/photo-1477587458883-47145ed94245",
+      "description": "The Pink City of Rajasthan, famed for hilltop forts, palaces, and vibrant bazaars."
+    },
+    {
+      "name": "Goa",
+      "country": "India",
+      "region": "Asia",
+      "latitude": 15.2993,
+      "longitude": 74.124,
+      "cost_index": 70,
+      "popularity_score": 95,
+      "image_url": "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2",
+      "description": "Palm-fringed beaches, Portuguese heritage, seafood shacks, and lively nightlife."
+    },
+    {
+      "name": "Manali",
+      "country": "India",
+      "region": "Asia",
+      "latitude": 32.2432,
+      "longitude": 77.1892,
+      "cost_index": 55,
+      "popularity_score": 82,
+      "image_url": "https://images.unsplash.com/photo-1626621341517-bbf3d33990ef",
+      "description": "A Himalayan resort town, a base for snow sports, treks, and Solang Valley adventures."
+    },
+    {
+      "name": "Udaipur",
+      "country": "India",
+      "region": "Asia",
+      "latitude": 24.5854,
+      "longitude": 73.7125,
+      "cost_index": 62,
+      "popularity_score": 80,
+      "image_url": "https://images.unsplash.com/photo-1609766418204-94aae0ecf4e5",
+      "description": "The City of Lakes, celebrated for its palaces, ghats, and romantic sunset boat rides."
+    },
+    {
+      "name": "Paris",
+      "country": "France",
+      "region": "Europe",
+      "latitude": 48.8566,
+      "longitude": 2.3522,
+      "cost_index": 140,
+      "popularity_score": 98,
+      "image_url": "https://images.unsplash.com/photo-1502602898657-3e91760cbb34",
+      "description": "The City of Light: iconic monuments, world-class museums, cafes, and the Seine."
+    },
+    {
+      "name": "Tokyo",
+      "country": "Japan",
+      "region": "Asia",
+      "latitude": 35.6762,
+      "longitude": 139.6503,
+      "cost_index": 130,
+      "popularity_score": 96,
+      "image_url": "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf",
+      "description": "A dazzling mix of neon districts, ancient temples, and the world's best street food."
+    },
+    {
+      "name": "Bali",
+      "country": "Indonesia",
+      "region": "Asia",
+      "latitude": -8.4095,
+      "longitude": 115.1889,
+      "cost_index": 75,
+      "popularity_score": 94,
+      "image_url": "https://images.unsplash.com/photo-1537996194471-e657df975ab4",
+      "description": "Island of temples, rice terraces, surf beaches, and Ubud's jungle retreats."
+    },
+    {
+      "name": "New York",
+      "country": "United States",
+      "region": "North America",
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "cost_index": 150,
+      "popularity_score": 97,
+      "image_url": "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9",
+      "description": "The city that never sleeps: skyscrapers, Broadway, Central Park, and global cuisine."
+    }
+  ],
+  "activities": [
+    { "city": "Jaipur", "country": "India", "name": "Amber Fort tour", "category": "sightseeing", "estimated_cost": 500, "duration_minutes": 180, "description": "Explore the hilltop Amber Fort with its mirrored halls and elephant gate." },
+    { "city": "Jaipur", "country": "India", "name": "Hawa Mahal visit", "category": "sightseeing", "estimated_cost": 200, "duration_minutes": 90, "description": "Photograph the honeycomb facade of the Palace of Winds." },
+    { "city": "Jaipur", "country": "India", "name": "City Palace & Jantar Mantar", "category": "culture", "estimated_cost": 700, "duration_minutes": 150, "description": "Royal courtyards and the UNESCO astronomical observatory." },
+    { "city": "Jaipur", "country": "India", "name": "Rajasthani thali dinner", "category": "food", "estimated_cost": 600, "duration_minutes": 90, "description": "A traditional multi-dish Rajasthani feast." },
+    { "city": "Jaipur", "country": "India", "name": "Bapu Bazaar shopping", "category": "shopping", "estimated_cost": 1500, "duration_minutes": 120, "description": "Textiles, juttis, and handicrafts in the old-city market." },
+
+    { "city": "Goa", "country": "India", "name": "Baga Beach day", "category": "relaxation", "estimated_cost": 300, "duration_minutes": 240, "description": "Sunbathing, shacks, and water sports at Goa's busiest beach." },
+    { "city": "Goa", "country": "India", "name": "Old Goa church tour", "category": "culture", "estimated_cost": 250, "duration_minutes": 120, "description": "Basilica of Bom Jesus and the Se Cathedral." },
+    { "city": "Goa", "country": "India", "name": "Dudhsagar Falls trek", "category": "adventure", "estimated_cost": 2000, "duration_minutes": 360, "description": "Jeep safari and trek to the four-tiered waterfall." },
+    { "city": "Goa", "country": "India", "name": "Sunset cruise on the Mandovi", "category": "sightseeing", "estimated_cost": 800, "duration_minutes": 90, "description": "Live music and dance on an evening river cruise." },
+    { "city": "Goa", "country": "India", "name": "Seafood shack dinner", "category": "food", "estimated_cost": 1200, "duration_minutes": 120, "description": "Grilled fish, prawns, and Goan curry by the sea." },
+
+    { "city": "Manali", "country": "India", "name": "Solang Valley adventure", "category": "adventure", "estimated_cost": 2500, "duration_minutes": 300, "description": "Paragliding, zorbing, and ropeway rides." },
+    { "city": "Manali", "country": "India", "name": "Rohtang Pass excursion", "category": "nature", "estimated_cost": 3000, "duration_minutes": 480, "description": "Snowline day trip to the high mountain pass (permit required)." },
+    { "city": "Manali", "country": "India", "name": "Hadimba Temple visit", "category": "culture", "estimated_cost": 100, "duration_minutes": 60, "description": "A cedar-forest wooden temple dedicated to Hadimba Devi." },
+    { "city": "Manali", "country": "India", "name": "Old Manali cafe hopping", "category": "food", "estimated_cost": 800, "duration_minutes": 150, "description": "Riverside cafes with mountain views." },
+
+    { "city": "Udaipur", "country": "India", "name": "Lake Pichola boat ride", "category": "sightseeing", "estimated_cost": 700, "duration_minutes": 90, "description": "Sunset cruise past Jag Mandir and the Lake Palace." },
+    { "city": "Udaipur", "country": "India", "name": "City Palace complex", "category": "culture", "estimated_cost": 600, "duration_minutes": 150, "description": "Rajasthan's largest palace complex overlooking the lake." },
+    { "city": "Udaipur", "country": "India", "name": "Saheliyon ki Bari gardens", "category": "nature", "estimated_cost": 150, "duration_minutes": 75, "description": "Fountains, lotus pools, and marble pavilions." },
+    { "city": "Udaipur", "country": "India", "name": "Rooftop Rajasthani dinner", "category": "food", "estimated_cost": 900, "duration_minutes": 105, "description": "Lake-view dining with folk music." },
+
+    { "city": "Paris", "country": "France", "name": "Eiffel Tower summit", "category": "sightseeing", "estimated_cost": 2900, "duration_minutes": 150, "description": "Lift to the summit for panoramic city views." },
+    { "city": "Paris", "country": "France", "name": "Louvre Museum", "category": "culture", "estimated_cost": 1700, "duration_minutes": 210, "description": "The Mona Lisa and millennia of art." },
+    { "city": "Paris", "country": "France", "name": "Seine river cruise", "category": "sightseeing", "estimated_cost": 1500, "duration_minutes": 75, "description": "Glide past Notre-Dame and the Louvre by boat." },
+    { "city": "Paris", "country": "France", "name": "Montmartre & Sacre-Coeur walk", "category": "sightseeing", "estimated_cost": 0, "duration_minutes": 120, "description": "Artists' quarter and the hilltop basilica." },
+    { "city": "Paris", "country": "France", "name": "French bistro dinner", "category": "food", "estimated_cost": 4500, "duration_minutes": 120, "description": "Classic three-course meal with wine." },
+
+    { "city": "Tokyo", "country": "Japan", "name": "Senso-ji Temple & Asakusa", "category": "culture", "estimated_cost": 0, "duration_minutes": 120, "description": "Tokyo's oldest temple and Nakamise shopping street." },
+    { "city": "Tokyo", "country": "Japan", "name": "Shibuya Crossing & Harajuku", "category": "sightseeing", "estimated_cost": 0, "duration_minutes": 150, "description": "The world's busiest crossing and youth-fashion district." },
+    { "city": "Tokyo", "country": "Japan", "name": "teamLab digital art museum", "category": "culture", "estimated_cost": 2400, "duration_minutes": 180, "description": "Immersive, interactive light installations." },
+    { "city": "Tokyo", "country": "Japan", "name": "Tsukiji sushi breakfast", "category": "food", "estimated_cost": 3000, "duration_minutes": 90, "description": "Fresh sushi and street snacks at the outer market." },
+    { "city": "Tokyo", "country": "Japan", "name": "Mt. Fuji day trip", "category": "nature", "estimated_cost": 9000, "duration_minutes": 600, "description": "Bus tour to the fifth station and Lake Kawaguchi." },
+
+    { "city": "Bali", "country": "Indonesia", "name": "Ubud rice terraces", "category": "nature", "estimated_cost": 500, "duration_minutes": 120, "description": "The emerald Tegallalang terraces and jungle swings." },
+    { "city": "Bali", "country": "Indonesia", "name": "Uluwatu Temple & Kecak dance", "category": "culture", "estimated_cost": 700, "duration_minutes": 150, "description": "Clifftop temple with a sunset fire dance." },
+    { "city": "Bali", "country": "Indonesia", "name": "Nusa Penida island tour", "category": "adventure", "estimated_cost": 4000, "duration_minutes": 540, "description": "Speedboat to Kelingking Beach and snorkeling spots." },
+    { "city": "Bali", "country": "Indonesia", "name": "Seminyak beach club", "category": "relaxation", "estimated_cost": 2500, "duration_minutes": 240, "description": "Daybeds, pools, and sunset cocktails." },
+
+    { "city": "New York", "country": "United States", "name": "Statue of Liberty & Ellis Island", "category": "sightseeing", "estimated_cost": 2500, "duration_minutes": 240, "description": "Ferry to Liberty Island and the immigration museum." },
+    { "city": "New York", "country": "United States", "name": "Empire State Building observatory", "category": "sightseeing", "estimated_cost": 3200, "duration_minutes": 120, "description": "Deco skyscraper with 86th-floor views." },
+    { "city": "New York", "country": "United States", "name": "Central Park walk", "category": "nature", "estimated_cost": 0, "duration_minutes": 120, "description": "Bethesda Terrace, the Mall, and the Bow Bridge." },
+    { "city": "New York", "country": "United States", "name": "Broadway show", "category": "culture", "estimated_cost": 9000, "duration_minutes": 165, "description": "A hit musical in the Theater District." },
+    { "city": "New York", "country": "United States", "name": "Metropolitan Museum of Art", "category": "culture", "estimated_cost": 2500, "duration_minutes": 180, "description": "One of the world's great encyclopedic art museums." }
+  ]
+}
