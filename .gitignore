@@ -1,0 +1,13 @@
+# IDEs and OS
+.vscode/
+.idea/
+.claude/
+.DS_Store
+
+# Environments
+.env
+.env.local
+*.env
+
+# Specific to this repo
+stitch_odoo_hack/

@@ -1,0 +1,25 @@
+# GlobeTrotter backend — runtime dependencies
+# Python 3.10+  ·  FastAPI + SQLAlchemy 2.0 + Alembic + PostgreSQL
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# ORM + migrations
+SQLAlchemy==2.0.35
+alembic==1.13.2
+
+# Validation / settings
+pydantic==2.9.2
+pydantic-settings==2.5.2
+email-validator==2.2.0
+
+# Auth / security
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1          # pinned: passlib 1.7.4 reads bcrypt.__about__, removed in bcrypt>=4.1
+PyJWT==2.9.0
+
+# Postgres driver (production). Not needed for the SQLite dev/test path.
+psycopg2-binary==2.9.9
+
+# Misc
+python-multipart==0.0.9
